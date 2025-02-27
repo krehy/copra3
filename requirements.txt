@@ -1,0 +1,6 @@
+numpy
+rich
+ccxt
+pandas
+ta
+matplotlib

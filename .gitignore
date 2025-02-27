@@ -1,0 +1,23 @@
+# Virtual Environment
+venv/
+
+# Python soubory cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Logy a debug výstupy
+logs/
+*.log
+
+# Nastavení editorů (VS Code, PyCharm)
+.vscode/
+.idea/
+
+# Zálohy a dočasné soubory
+*.bak
+*.swp
+
+# Konfigurace API klíčů
+.env
