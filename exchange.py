@@ -1,6 +1,7 @@
 import ccxt
 import pandas as pd
 import time
+import sys
 
 # Inicializace Binance API (používáme veřejný přístup pro historická data)
 exchange = ccxt.binance()
@@ -16,6 +17,7 @@ def get_historical_data(symbol: str, timeframe: str, limit: int = 1000):
     """
     all_candles = []
     since = exchange.milliseconds() - exchange.parse_timeframe(timeframe) * limit * 1000  # Startujeme od času odpovídajícího požadovanému limitu
+    total_downloaded = 0  # Počítadlo stažených svíček
 
     while limit > 0:
         fetch_limit = min(limit, 1000)  # Max 1000 svíček na request
@@ -27,8 +29,15 @@ def get_historical_data(symbol: str, timeframe: str, limit: int = 1000):
         all_candles.extend(candles)
         since = candles[-1][0] + 1  # Posuneme `since` na čas poslední stažené svíčky
         limit -= fetch_limit  # Odečteme stažené svíčky
+        total_downloaded += len(candles)  # Aktualizujeme počet stažených svíček
+
+        # LOG: Aktualizace na jednom řádku
+        sys.stdout.write(f"\rStahuji svíčky pro test {total_downloaded}/{limit + total_downloaded}")
+        sys.stdout.flush()
 
         time.sleep(0.5)  # Pauza, abychom nezasypali Binance API
+
+    print("\n✅ Stahování dokončeno!")  # Nový řádek po dokončení
 
     # Převod na pandas DataFrame
     df = pd.DataFrame(all_candles, columns=["timestamp", "open", "high", "low", "close", "volume"])

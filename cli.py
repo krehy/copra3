@@ -3,6 +3,7 @@ import exchange
 from mean_reversion import MeanReversion
 from trend_following import TrendFollowing
 from backtest import Backtest
+from optimalization import optimize_strategy
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
@@ -29,7 +30,7 @@ def main_menu():
             if choice == "1":
                 backtest_menu()
             elif choice == "2":
-                console.print("[bold yellow]Optimalizace zatím není implementována...[/bold yellow]")
+                optimization_menu()
             elif choice == "3":
                 console.print("[bold red]Ukončuji program...[/bold red]")
                 sys.exit()
@@ -109,6 +110,34 @@ def display_results(results, strategy_name):
     table.add_row("Testované období", results['test_period'])  # ✅ Oprava – odstraněno `:.2f`
 
     console.print(table)
+
+def optimization_menu():
+    """Menu pro optimalizaci"""
+    console.clear()
+    console.print(Panel("[bold cyan]⚙️ Optimalizace strategie[/bold cyan]", expand=False))
+
+    console.print("[1] 🔄 Optimalizovat Mean Reversion", style="bold green")
+    console.print("[2] 🔄 Optimalizovat Trend Following", style="bold blue")
+    console.print("[3] 🔙 Zpět na hlavní menu", style="bold red")
+
+    choice = Prompt.ask("\nVyber možnost", choices=["1", "2", "3"])
+
+    if choice in ["1", "2"]:
+        strategy_name = "mean_reversion" if choice == "1" else "trend_following"
+
+        symbol = Prompt.ask("Zadej symbol (např. BTCUSDT)", default="BTCUSDT")
+        timeframe = Prompt.ask("Zadej timeframe (např. 1h, 4h, 1d)", default="1h")
+        candles = int(Prompt.ask("Kolik svíček stáhnout?", default="10000"))
+        initial_balance = float(Prompt.ask("Zadej počáteční kapitál", default="10000"))
+        n_trials = int(Prompt.ask("Kolik testů vykonat?", default="50"))
+        n_splits = int(Prompt.ask("Kolik Walk-Forward segmentů použít?", default="5"))  # ✅ Přidána možnost zadat segmenty
+
+        optimize_strategy(strategy_name, symbol, timeframe, candles, initial_balance, n_trials, n_splits)
+
+        input("\n[Stiskni Enter pro návrat]")
+
+    elif choice == "3":
+        return
 
 if __name__ == "__main__":
     main_menu()

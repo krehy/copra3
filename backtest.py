@@ -40,62 +40,105 @@ class Backtest:
         self.symbol = symbol
         self.timeframe = timeframe
         self.num_candles = len(data)  # Uložíme počet svíček
-        data = self.strategy.generate_signals(data)
+        data = self.strategy.generate_signals(data, self.balance, self.max_balance)
 
         self.log_debug(f"[bold yellow]DEBUG: Spouštím backtest pro {symbol} ({timeframe}) na {self.num_candles} svíčkách...[/bold yellow]")
 
         for i in range(len(data)):
             row = data.iloc[i]
 
-            # Otevření LONG pozice (pokud nejsme už v obchodě)
+            # Výpočet drawdownu a úprava risku
+            adjusted_risk = self.strategy.adjust_risk_based_on_drawdown(self.balance, self.max_balance)
+
+            # Otevření LONG pozice
             if row["long_signal"] and not self.positions:
-                self.log_debug(f"[green]DEBUG: Otevření LONG pozice za {row['close']}[/green]")
+                position_size, _ = self.strategy.calculate_position_size(self.balance, row["close"], row["long_stop_loss_price"], self.max_balance)
+
+                self.log_debug(f"[green]DEBUG: Otevření LONG pozice za {row['close']}, Velikost pozice: {position_size}, Risk: {adjusted_risk:.2%}[/green]")
+
                 self.positions.append({
+                    "type": "long",
                     "entry_price": row["close"],
-                    "stop_loss": row["stop_loss_price"],
-                    "take_profit": row["take_profit_price"],
-                    "trailing_stop": row["trailing_stop_price"]
+                    "stop_loss": row["long_stop_loss_price"],
+                    "take_profit": row["long_take_profit_price"],
+                    "trailing_stop": row["long_trailing_stop_price"],
+                    "size": position_size
+                })
+            # Otevření SHORT pozice
+            if row["short_signal"] and not self.positions:
+                position_size = row["short_position_size"]
+                stop_loss_price = row["short_stop_loss_price"]
+
+                self.log_debug(f"[red]DEBUG: Otevření SHORT pozice za {row['close']}, Velikost pozice: {position_size}, SL: {stop_loss_price}[/red]")
+
+                self.positions.append({
+                    "type": "short",
+                    "entry_price": row["close"],
+                    "stop_loss": stop_loss_price,
+                    "take_profit": row["short_take_profit_price"],
+                    "trailing_stop": row["short_trailing_stop_price"],
+                    "size": position_size
                 })
 
-            # Uzavření LONG pozice (Stop-Loss, Take-Profit, Trailing Stop nebo RSI exit)
-            for position in self.positions[:]:  # Procházíme kopii seznamu, aby nedošlo k chybě při mazání položek
-                if row["close"] <= position["stop_loss"]:
-                    # Stop-Loss aktivován
-                    profit = position["stop_loss"] - position["entry_price"]
-                    self.balance += profit
-                    self.trades.append(profit)
-                    self.log_debug(f"[red]DEBUG: SL uzavřel LONG za {row['close']}, Profit: {profit}[/red]")
-                    self.positions.remove(position)
+            for position in self.positions[:]:  # Kopie seznamu, aby nedošlo k chybě při mazání
+                if position["type"] == "long":
+                    if row["close"] <= position["stop_loss"]:
+                        profit = (position["stop_loss"] - position["entry_price"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[red]DEBUG: SL uzavřel LONG za {row['close']}, Profit: {profit}[/red]")
 
-                elif row["close"] >= position["take_profit"]:
-                    # Take-Profit aktivován
-                    profit = position["take_profit"] - position["entry_price"]
-                    self.balance += profit
-                    self.trades.append(profit)
-                    self.log_debug(f"[green]DEBUG: TP uzavřel LONG za {row['close']}, Profit: {profit}[/green]")
-                    self.positions.remove(position)
+                    elif row["close"] >= position["take_profit"]:
+                        profit = (position["take_profit"] - position["entry_price"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[green]DEBUG: TP uzavřel LONG za {row['close']}, Profit: {profit}[/green]")
 
-                elif row["close"] < position["trailing_stop"]:
-                    # Trailing Stop aktivován
-                    profit = position["trailing_stop"] - position["entry_price"]
-                    self.balance += profit
-                    self.trades.append(profit)
-                    self.log_debug(f"[cyan]DEBUG: TS uzavřel LONG za {row['close']}, Profit: {profit}[/cyan]")
-                    self.positions.remove(position)
+                    elif row["close"] < position["trailing_stop"]:
+                        profit = (position["trailing_stop"] - position["entry_price"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[cyan]DEBUG: TS uzavřel LONG za {row['close']}, Profit: {profit}[/cyan]")
 
-                elif row["close_long_signal"]:
-                    # RSI exit signál aktivován
-                    profit = row["close"] - position["entry_price"]
-                    self.balance += profit
-                    self.trades.append(profit)
-                    self.log_debug(f"[yellow]DEBUG: RSI exit uzavřel LONG za {row['close']}, Profit: {profit}[/yellow]")
-                    self.positions.remove(position)
+                    elif row["close_long_signal"]:
+                        profit = (row["close"] - position["entry_price"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[yellow]DEBUG: RSI exit uzavřel LONG za {row['close']}, Profit: {profit}[/yellow]")
 
-            # Aktualizace trailing stopu (pokud je v otevřené pozici)
-            for position in self.positions:
-                if row["close"] > position["entry_price"]:
-                    position["trailing_stop"] = max(position["trailing_stop"], row["close"] * (1 - self.strategy.trailing_stop))
+                elif position["type"] == "short":
+                    if row["close"] >= position["stop_loss"]:
+                        profit = (position["entry_price"] - position["stop_loss"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[red]DEBUG: SL uzavřel SHORT za {row['close']}, Profit: {profit}[/red]")
 
+                    elif row["close"] <= position["take_profit"]:
+                        profit = (position["entry_price"] - position["take_profit"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[green]DEBUG: TP uzavřel SHORT za {row['close']}, Profit: {profit}[/green]")
+
+                    elif row["close"] > position["trailing_stop"]:
+                        profit = (position["entry_price"] - position["trailing_stop"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[cyan]DEBUG: TS uzavřel SHORT za {row['close']}, Profit: {profit}[/cyan]")
+
+                    elif row["close_short_signal"]:
+                        profit = (position["entry_price"] - row["close"]) * position["size"]
+                        self.balance += profit
+                        self.trades.append(profit)
+                        self.positions.remove(position)
+                        self.log_debug(f"[yellow]DEBUG: RSI exit uzavřel SHORT za {row['close']}, Profit: {profit}[/yellow]")
+        
             # Aktualizace max balance a drawdownu
             self.max_balance = max(self.max_balance, self.balance)
             drawdown = (self.max_balance - self.balance) / self.max_balance * 100
@@ -163,7 +206,7 @@ class Backtest:
 
         # Opravený výpočet Risk-Reward Ratio (RRR)
         rrr = (avg_profit_per_trade / abs(avg_loss_per_trade)) if total_losses > 0 else float("inf")
-        
+
         sharpe_ratio = np.mean(self.trades) / np.std(self.trades) if len(self.trades) > 1 else 0
 
         # Generování grafu vývoje kapitálu
